@@ -34,23 +34,19 @@ class SteamGameDetail(scrapy.Spider):
         inputs = rows[(~rows.appid.isin(common.appid))]
         for row in inputs.itertuples():
             appid = row.appid
-            # appid = '1796140'
             yield scrapy.Request(
                 url='http://store.steampowered.com/api/appdetails?appids=' + str(appid),
                 method='GET', callback=self.parse_basic_info, meta={'row': row},
                 dont_filter=True)
-            # if True:
-            #     break
 
     @inline_requests
     def parse_basic_info(self, response):
         row = pandas.DataFrame(response.meta['row'])
         appid = row.iat[1, 0]
-        # appid = '1796140'
         name = row.iat[2, 0]
         detail = convertRawString2Json(response.text).get(str(appid)).get('data')
         if detail == None:
-            # self.create_csv([[appid]], r'csv/steam_game_detail_history.csv')
+            self.create_csv([[appid]], r'csv/steam_game_detail_history.csv')
             return
         short_description = detail.get('short_description')
         release_date = detail.get('release_date').get('date') if detail.get('release_date') != None else ''
