@@ -26,7 +26,7 @@ class SteamGameDetail(scrapy.Spider):
     allowed_domains = []
 
     def start_requests(self):
-        rows = self.get_rows(r'csv/steam_game_list_'+str(self.jobId)+'.csv')
+        rows = self.get_rows(r'task/steam_game_list_'+str(self.jobId)+'.csv')
         rows.set_index(['appid'])
         history = self.get_rows(r'csv/steam_game_detail_history.csv')
         history.set_index(['appid'])
