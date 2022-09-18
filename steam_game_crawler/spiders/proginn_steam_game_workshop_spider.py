@@ -20,7 +20,7 @@ class SteamGameWorkshop(scrapy.Spider):
         'DOWNLOAD_TIMEOUT': 60000,
         'DOWNLOAD_MAXSIZE': 12406585060,
         'DOWNLOAD_WARNSIZE': 0,
-        'DOWNLOAD_DELAY': 0.1,
+        'DOWNLOAD_DELAY': 0,
         'RANDOMIZE_DOWNLOAD_DELAY': True,
         'DOWNLOADER_MIDDLEWARES': DOWNLOADER_MIDDLEWARES_SQUID_PROXY_OFF
     }
@@ -28,20 +28,23 @@ class SteamGameWorkshop(scrapy.Spider):
     allowed_domains = []
 
     def start_requests(self):
-        rows = self.get_rows(r'/Users/sunpanpan/Workspace/Work/Doyle/steam_game_list.csv')
-        for row in rows.itertuples():
+        rows = self.get_rows(r'task/steam_game_workshop_list_'+str(self.jobId)+'.csv')
+        rows.set_index(['appid'])
+        history = self.get_rows(r'csv/steam_game_workshop_history.csv')
+        history.set_index(['appid'])
+        common = rows.merge(history, on=['appid'])
+        inputs = rows[(~rows.appid.isin(common.appid))]
+        for row in inputs.itertuples():
+            appid = row.appid
             yield scrapy.Request(
-                url='https://steamcommunity.com/app/255710/workshop/',
+                url='https://steamcommunity.com/app/'+str(appid)+'/workshop/',
                 method='GET', callback=self.parse_basic_info, meta={'row': row},
                 dont_filter=True)
-            if True:
-                break
 
     @inline_requests
     def parse_basic_info(self, response):
         row = pandas.DataFrame(response.meta['row'])
         appid = row.iat[1, 0]
-        name = row.iat[2, 0]
         tag_list = scrapy.Selector(text=response.text).xpath('//div[contains(@class, "responsive_local_menu")]/div[contains(@class, "panel")]/div[contains(@class, "filterOption")]').extract()
         tags = ''
         for tag in tag_list:
@@ -68,7 +71,7 @@ class SteamGameWorkshop(scrapy.Spider):
                 year_start_timestamp = int(time.mktime(datetime.datetime.strptime(year_start, "%Y-%m-%d").timetuple()))
                 year_end_timestamp = int(time.mktime(datetime.datetime.strptime(year_end, "%Y-%m-%d").timetuple()))
                 extra_detail = yield scrapy.Request(
-                    url='https://steamcommunity.com/workshop/browse/?appid=255710&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start='+str(year_start_timestamp)+'&created_date_range_filter_end='+str(year_end_timestamp)+'&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN',
+                    url='https://steamcommunity.com/workshop/browse/?appid='+str(appid)+'&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start='+str(year_start_timestamp)+'&created_date_range_filter_end='+str(year_end_timestamp)+'&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN',
                     dont_filter=True)
                 entries = extractStringFromSelector(
                     scrapy.Selector(text=extra_detail.text).xpath(
@@ -78,30 +81,47 @@ class SteamGameWorkshop(scrapy.Spider):
                     pages = 0
                     if len(entries_count) > 0:
                         pages = ceil(int(entries_count[0].replace(',', ''))/30)
-                        pages = 1
-                        if pages > 0:
-                            for page in range(1, pages + 1):
-                                workshop_browse_items_response = yield scrapy.Request(
-                                    url='https://steamcommunity.com/workshop/browse/?appid=255710&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start=' + str(
-                                        year_start_timestamp) + '&created_date_range_filter_end=' + str(
-                                        year_end_timestamp) + '&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN&actualsort=mostrecent&p=' + str(page),
-                                    dont_filter=True)
-                                workshop_browse_items = scrapy.Selector(text=workshop_browse_items_response.text).xpath(
-                                    '//div[contains(@id, "profileBlock")]//div[contains(@class, "workshopBrowseItems")]/div[contains(@class, "workshopItem")]').extract()
-                                for workshop_browse_item in workshop_browse_items:
-                                    item_link = extractStringFromSelector(
-                                         scrapy.Selector(text=workshop_browse_item).xpath('//a[contains(@class, "item_link")]/@href').extract(), 0).strip()
-                                    workshop_item_title = extractStringFromSelector(
-                                         scrapy.Selector(text=workshop_browse_item).xpath('//a[contains(@class, "item_link")]/div[contains(@class, "workshopItemTitle")]/text()').extract(), 0).strip()
-                                    if len(item_link) > 0:
-                                        workshop_item_detail_response = yield scrapy.Request(url=item_link, dont_filter=True)
-                                        workshop_item_category, workshop_item_posted, workshop_item_updated, workshop_item_change_notes_num, workshop_item_change_notes_url, \
-                                        workshop_item_creator_list, workshop_item_visitor_count, workshop_item_subscriber_count, workshop_item_favorite_count, workshop_item_description, workshop_item_comment_count = \
-                                            self.parse_workshop_browse_item(workshop_item_detail_response)
-                                        if len(workshop_item_change_notes_url) > 0:
-                                            workshop_item_change_notes_response = yield scrapy.Request(
-                                                url=workshop_item_change_notes_url, dont_filter=True)
-                                            changelog_list = self.parse_workshop_item_change_notes(workshop_item_change_notes_response)
+                    if pages > 0:
+                        for page in range(1, pages + 1):
+                            workshop_browse_item_list = []
+                            workshop_browse_items_response = yield scrapy.Request(
+                                url='https://steamcommunity.com/workshop/browse/?appid=' + str(
+                                    appid) + '&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start=' + str(
+                                    year_start_timestamp) + '&created_date_range_filter_end=' + str(
+                                    year_end_timestamp) + '&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN&actualsort=mostrecent&p=' + str(
+                                    page),
+                                dont_filter=True)
+                            workshop_browse_items = scrapy.Selector(text=workshop_browse_items_response.text).xpath(
+                                '//div[contains(@id, "profileBlock")]//div[contains(@class, "workshopBrowseItems")]/div[contains(@class, "workshopItem")]').extract()
+                            for workshop_browse_item in workshop_browse_items:
+                                item_link = extractStringFromSelector(
+                                    scrapy.Selector(text=workshop_browse_item).xpath(
+                                        '//a[contains(@class, "item_link")]/@href').extract(), 0).strip()
+                                workshop_item_title = extractStringFromSelector(
+                                    scrapy.Selector(text=workshop_browse_item).xpath(
+                                        '//a[contains(@class, "item_link")]/div[contains(@class, "workshopItemTitle")]/text()').extract(),
+                                    0).strip()
+                                if len(item_link) > 0:
+                                    workshop_item_detail_response = yield scrapy.Request(url=item_link,
+                                                                                         dont_filter=True)
+                                    workshop_item_category, workshop_item_posted, workshop_item_updated, workshop_item_change_notes_num, workshop_item_change_notes_url, \
+                                    workshop_item_creator_list, workshop_item_visitor_count, workshop_item_subscriber_count, workshop_item_favorite_count, workshop_item_description, workshop_item_comment_count = \
+                                        self.parse_workshop_browse_item(workshop_item_detail_response)
+                                    workshop_item_creators = '|'.join(workshop_item_creator_list)
+                                    workshop_item_change_notes = ''
+                                    if len(workshop_item_change_notes_url) > 0:
+                                        workshop_item_change_notes_response = yield scrapy.Request(
+                                            url=workshop_item_change_notes_url, dont_filter=True)
+                                        changelog_list = self.parse_workshop_item_change_notes(
+                                            workshop_item_change_notes_response)
+                                        workshop_item_change_notes = '|'.join(changelog_list)
+                                    workshop_browse_item_list.append([item_link, appid, tags, total_count, workshop_item_title, workshop_item_category, workshop_item_posted,
+                                          workshop_item_updated, workshop_item_change_notes_num, workshop_item_change_notes, workshop_item_creators,
+                                          workshop_item_visitor_count, workshop_item_subscriber_count, workshop_item_favorite_count, workshop_item_description,
+                                          workshop_item_comment_count])
+                            if len(workshop_browse_item_list) > 0:
+                                self.create_csv(workshop_browse_item_list, r'csv/steam_game_workshop_detail.csv')
+        self.create_csv([[appid]], r'csv/steam_game_workshop_history.csv')
 
     def parse_workshop_browse_item(self, workshop_item_detail_response):
         workshop_item_category = extractStringFromSelector(scrapy.Selector(text=workshop_item_detail_response.text).xpath('//div[contains(@class, "responsive_local_menu")]//div[contains(@class, "rightDetailsBlock") or contains(@class, "workshopTags")]/a/text()').extract(), 0).strip()
@@ -115,13 +135,13 @@ class SteamGameWorkshop(scrapy.Spider):
             scrapy.Selector(text=workshop_item_detail_response.text).xpath(
                 '//div[contains(@class, "responsive_local_menu")]/div[contains(@class, "rightDetailsBlock")]/div[contains(@class, "detailsStatNumChangeNotes")]/span[contains(@class, "change_note_link")]/a/@href').extract(), 0).strip()
         workshop_item_creators = scrapy.Selector(text=workshop_item_detail_response.text).xpath(
-                '//div[contains(@id, "rightContents")]//div[contains(@class, "panel")]//div[contains(@class, "creatorsBlock")]').extract()
+                '//div[contains(@id, "rightContents")]//div[contains(@class, "panel")]//div[contains(@class, "creatorsBlock")]/div[contains(@class, "friendBlock")]').extract()
         workshop_item_creator_list = []
         for workshop_item_creator in workshop_item_creators:
             workshop_item_creator_url = extractStringFromSelector(scrapy.Selector(text=workshop_item_creator).xpath('//a[contains(@class, "friendBlockLinkOverlay")]/@href').extract(), 0).strip()
             workshop_item_creator_id = extractStringFromSelector(scrapy.Selector(text=workshop_item_creator).xpath(
                 '//div[contains(@class, "friendBlockContent")]/text()').extract(), 0).strip()
-            workshop_item_creator_list.append([workshop_item_creator_url, workshop_item_creator_id])
+            workshop_item_creator_list.append('(' + workshop_item_creator_id + ')' + workshop_item_creator_url)
         workshop_item_visitor_count = extractStringFromSelector(scrapy.Selector(text=workshop_item_detail_response.text).xpath(
             '((//div[contains(@id, "rightContents")]//div[contains(@class, "panel")]//table[contains(@class, "stats_table")]//tr)[1]/td)[1]/text()').extract(), 0).strip().replace(',', '')
         workshop_item_subscriber_count = extractStringFromSelector(
@@ -150,7 +170,7 @@ class SteamGameWorkshop(scrapy.Spider):
                 '//div[contains(@class, "changelog")]/text()').extract(), 0).strip()
             changelog_content = extractStringFromSelector(scrapy.Selector(text=change_note).xpath(
                 '//p[boolean(@id)]/text()').extract(), 0).strip()
-            changelog_list.append([changelog_updated, changelog_content])
+            changelog_list.append('(' + changelog_updated + ')' + changelog_content)
         return changelog_list
 
     def get_rows(self, path):
