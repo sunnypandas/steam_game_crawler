@@ -54,7 +54,7 @@ class SteamGameWorkshop(scrapy.Spider):
             tag_label_count = tag_label + tag_count
             tags = tags + tag_label_count + '|'
         total_counts = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?!\d)',extractStringFromSelector(
-                scrapy.Selector(text=response.text).xpath('//div[contains(@class, "section_bottom_bar")]/a/span/text()').extract(), 0).strip())
+                scrapy.Selector(text=response.text).xpath('(//div[contains(@class, "section_bottom_bar")])[last()]/a/span/text()').extract(), 0).strip())
         total_count = 0
         if len(total_counts) > 0:
             total_count = total_counts[0].replace(',', '')
@@ -71,19 +71,25 @@ class SteamGameWorkshop(scrapy.Spider):
                 year_start_timestamp = int(time.mktime(datetime.datetime.strptime(year_start, "%Y-%m-%d").timetuple()))
                 year_end_timestamp = int(time.mktime(datetime.datetime.strptime(year_end, "%Y-%m-%d").timetuple()))
                 extra_detail = yield scrapy.Request(
-                    url='https://steamcommunity.com/workshop/browse/?appid='+str(appid)+'&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start='+str(year_start_timestamp)+'&created_date_range_filter_end='+str(year_end_timestamp)+'&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN',
+                    url='https://steamcommunity.com/workshop/browse/?appid=' + str(
+                        appid) + '&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start=' + str(
+                        year_start_timestamp) + '&created_date_range_filter_end=' + str(
+                        year_end_timestamp) + '&updated_date_range_filter_start=NaN&updated_date_range_filter_end=NaN',
                     dont_filter=True)
                 entries = extractStringFromSelector(
                     scrapy.Selector(text=extra_detail.text).xpath(
-                        '//div[contains(@id, "profileBlock")]//div[contains(@class, "workshopBrowsePagingInfo")]/text()').extract(), 0).strip()
+                        '//div[contains(@id, "profileBlock")]//div[contains(@class, "workshopBrowsePagingInfo")]/text()').extract(),
+                    0).strip()
                 if len(entries) > 0:
                     entries_count = re.findall(r'\b\d{1,3}(?:,\d{3})*(?:\.\d+)?(?!\d)', entries.split('of')[1])
                     pages = 0
                     if len(entries_count) > 0:
-                        pages = ceil(int(entries_count[0].replace(',', ''))/30)
+                        pages = ceil(int(entries_count[0].replace(',', '')) / 30)
+                    if pages > 1650:
+                        pages = 1650
                     if pages > 0:
+                        workshop_browse_item_list = []
                         for page in range(1, pages + 1):
-                            workshop_browse_item_list = []
                             workshop_browse_items_response = yield scrapy.Request(
                                 url='https://steamcommunity.com/workshop/browse/?appid=' + str(
                                     appid) + '&searchtext=&childpublishedfileid=0&browsesort=mostrecent&section=readytouseitems&created_date_range_filter_start=' + str(
@@ -115,12 +121,16 @@ class SteamGameWorkshop(scrapy.Spider):
                                         changelog_list = self.parse_workshop_item_change_notes(
                                             workshop_item_change_notes_response)
                                         workshop_item_change_notes = '|'.join(changelog_list)
-                                    workshop_browse_item_list.append([item_link, appid, tags, total_count, workshop_item_title, workshop_item_category, workshop_item_posted,
-                                          workshop_item_updated, workshop_item_change_notes_num, workshop_item_change_notes, workshop_item_creators,
-                                          workshop_item_visitor_count, workshop_item_subscriber_count, workshop_item_favorite_count, workshop_item_description,
-                                          workshop_item_comment_count])
-                            if len(workshop_browse_item_list) > 0:
-                                self.create_csv(workshop_browse_item_list, r'csv/steam_game_workshop_detail.csv')
+                                    workshop_browse_item_list.append(
+                                        [item_link, appid, tags, total_count, workshop_item_title,
+                                         workshop_item_category, workshop_item_posted,
+                                         workshop_item_updated, workshop_item_change_notes_num,
+                                         workshop_item_change_notes, workshop_item_creators,
+                                         workshop_item_visitor_count, workshop_item_subscriber_count,
+                                         workshop_item_favorite_count, workshop_item_description,
+                                         workshop_item_comment_count])
+                        if len(workshop_browse_item_list) > 0:
+                            self.create_csv(workshop_browse_item_list, r'csv/steam_game_workshop_detail.csv')
         self.create_csv([[appid]], r'csv/steam_game_workshop_history.csv')
 
     def parse_workshop_browse_item(self, workshop_item_detail_response):

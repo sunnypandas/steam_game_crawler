@@ -2,3 +2,4 @@ itemadapter==0.2.0
 pandas==1.4.2
 Scrapy==2.6.2
 scrapy_inline_requests==0.3.1
+scrapy-fake-useragent==1.4.4
